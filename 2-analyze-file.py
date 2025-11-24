@@ -11,11 +11,21 @@ import requests
 
 
 def main():
+
+    # Get config settings
+    load_dotenv()
+    ai_svc_endpoint = os.getenv('ENDPOINT')
+    ai_svc_key = os.getenv('KEY')
+    subscription_key = os.getenv('SUBSCRIPTION_KEY')
+#     analyzer = os.getenv('ANALYZER_NAME')
+#     schema_json = os.getenv('SCHEMA_JSON')
+    api_version = os.getenv('API_VERSION')
+
     settings = Settings(
-        endpoint="https://ai-admin2732ai097189535190.cognitiveservices.azure.com/",
+        endpoint=ai_svc_endpoint,
         api_version="2025-05-01-preview",
         # Either subscription_key or aad_token must be provided. Subscription Key is more prioritized.
-        subscription_key="AZURE_CONTENT_UNDERSTANDING_SUBSCRIPTION_KEY",
+        subscription_key=subscription_key,
         aad_token="AZURE_CONTENT_UNDERSTANDING_AAD_TOKEN",
         # Insert the analyzer name.
         analyzer_id="qm-video-analyzer",
