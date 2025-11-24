@@ -1,3 +1,11 @@
+from dotenv import load_dotenv
+import os
+from azure.storage.blob import BlobServiceClient, BlobClient
+from BlobStorageUtils import BlobStorageUtils
+from CommonUtils import CommonUtils
+from azure.identity import DefaultAzureCredential
+
+
 import json
 import logging
 import sys
@@ -12,25 +20,46 @@ import requests
 
 def main():
 
+    load_dotenv()
+    container = os.getenv("BLOB_CONTAINER_NAME")
+    blob_name_input = os.getenv("BLOB_NAME_INPUT")
+    blob_name_output = os.getenv("BLOB_NAME_OUTPUT")
+    local_file = os.getenv("LOCAL_JSON_FILE")
+    conn_str = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+
+    blob_service = BlobServiceClient.from_connection_string(conn_str)
+    container_client = blob_service.get_container_client(container)
+
+    blob_utils = BlobStorageUtils(connection_string=conn_str, container_name=container)
+    base_path = blob_name_input
+
+    commonUtils = CommonUtils()
+
+    # 下载到内存 bytes
+    prefix = '4503600076332091-2025-11-04-182104.mp4'
+    data_bytes = commonUtils.read_video_to_bytes(blob_utils, base_path, prefix)
+#     print("Blob content as bytes:", data_bytes)
+
     # Get config settings
     load_dotenv()
     ai_svc_endpoint = os.getenv('ENDPOINT')
     ai_svc_key = os.getenv('KEY')
-    subscription_key = os.getenv('SUBSCRIPTION_KEY')
-#     analyzer = os.getenv('ANALYZER_NAME')
+    key = os.getenv('KEY')
+    analyzer = os.getenv('ANALYZER_NAME')
 #     schema_json = os.getenv('SCHEMA_JSON')
-    api_version = os.getenv('API_VERSION')
+    version = os.getenv('API_VERSION')
+    file_path = os.getenv('FILE_LOCATION')
 
     settings = Settings(
         endpoint=ai_svc_endpoint,
-        api_version="2025-05-01-preview",
+        api_version=version,
         # Either subscription_key or aad_token must be provided. Subscription Key is more prioritized.
-        subscription_key=subscription_key,
+        subscription_key=key,
         aad_token="AZURE_CONTENT_UNDERSTANDING_AAD_TOKEN",
         # Insert the analyzer name.
-        analyzer_id="qm-video-analyzer",
+        analyzer_id=analyzer,
         # Insert the supported file types of the analyzer.
-        file_location="https://raw.githubusercontent.com/Azure/azure-sdk-for-python/main/sdk/formrecognizer/azure-ai-formrecognizer/tests/sample_forms/receipt/contoso-receipt.png",
+        file_location=file_path,
     )
     client = AzureContentUnderstandingClient(
         settings.endpoint,
@@ -38,13 +67,72 @@ def main():
         subscription_key=settings.subscription_key,
         token_provider=settings.token_provider,
     )
-    response = client.begin_analyze(settings.analyzer_id, settings.file_location)
+    response = client.begin_analyze(settings.analyzer_id, settings.file_location, data_bytes)
     result = client.poll_result(
         response,
         timeout_seconds=60 * 60,
         polling_interval_seconds=1,
     )
     json.dump(result, sys.stdout, indent=2)
+
+
+
+    # 将 JSON 字符串解析为 Python 对象（字典）
+    json_str = json.dumps(result)
+    data = json.loads(json_str)
+
+    # 导航到 contents -> 第一个元素 -> fields
+    contents = data.get("result", {}).get("contents", [])
+    if contents:
+        first_content = contents[0]
+        fields = first_content.get("fields", {})
+
+        ShoppingCart = fields.get("ShoppingCart", {}).get("valueString")
+        PlaceOrderwith = fields.get("PlaceOrderwith", {}).get("valueString")
+
+        cart_number = ShoppingCart.strip()
+        # 找到 “Place Order with” 之后的子串
+        if "Place Order with" in PlaceOrderwith:
+            payment_method = PlaceOrderwith.split("Place Order with", 1)[1].strip()
+        else:
+            payment_method = ""
+
+        print("cart_number:", cart_number)
+        print("payment_method:", payment_method)
+
+    else:
+        print("No contents found.")
+
+
+############################################################################################################
+
+
+    if not container or not blob_name_input or not local_file:
+        raise ValueError("环境变量 BLOB_CONTAINER_NAME, BLOB_NAME_INPUT, LOCAL_JSON_FILE 必须都设置")
+
+#     # 读取本地 json 文件
+#     with open(local_file, "r", encoding="utf-8") as f:
+#         file_data = json.load(f)
+#
+#     # 调用写入函数
+#     result = write_to_blob(container_name=container,
+#                            blob_name=blob_name,
+#                            data=file_data)
+
+
+    prefix = "QM Replay Analysis - Checkout Steps(Step5to6)"
+    header = "Date,Replay ID,Assignee,Quantum Metric Session,Customer UID,Order number,Cart number,Payment method,What is the issue?,JIRA ID,Comments/Observation"
+    row = (
+        f"\"5/13/2025\",\"\",\"Rohan\",\"https://mybobs.quantummetric.com/#/replay/4503600076332091?segmentId=36894&teamID=86bf92e0-5967-11ee-837a-42010a800104&ts=1747108800-1747195199&sessionTs=1747192085\",\"chontaylp@gmail.com\",\"NA\",\"{cart_number}\",\"{payment_method}\",\"\"\"After click on \"\"place Order with Affirm\"\"\", LongRunningSpinner followed by Console Errors.\",\"BE-8137\",\"\"\n"
+    )
+
+
+    result = commonUtils.write_csv_to_blob(blob_utils, blob_name_output, prefix, header, row)
+
+    print(result)
+
+
+############################################################################################################
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -105,7 +193,7 @@ class AzureContentUnderstandingClient:
             subscription_key, token_provider and token_provider(), x_ms_useragent
         )
 
-    def begin_analyze(self, analyzer_id: str, file_location: str):
+    def begin_analyze(self, analyzer_id: str, file_location: str, file_data: bytes):
         """
         Begins the analysis of a file or URL using the specified analyzer.
 
@@ -120,15 +208,19 @@ class AzureContentUnderstandingClient:
             ValueError: If the file location is not a valid path or URL.
             HTTPError: If the HTTP request returned an unsuccessful status code.
         """
-        if Path(file_location).exists():
-            with open(file_location, "rb") as file:
-                data = file.read()
-            headers = {"Content-Type": "application/octet-stream"}
-        elif "https://" in file_location or "http://" in file_location:
-            data = {"url": file_location}
-            headers = {"Content-Type": "application/json"}
-        else:
-            raise ValueError("File location must be a valid path or URL.")
+
+        data = file_data
+        headers = {"Content-Type": "application/octet-stream"}
+
+        # if Path(file_location).exists():
+        #     with open(file_location, "rb") as file:
+        #         data = file.read()
+        #     headers = {"Content-Type": "application/octet-stream"}
+        # elif "https://" in file_location or "http://" in file_location:
+        #     data = {"url": file_location}
+        #     headers = {"Content-Type": "application/json"}
+        # else:
+        #     raise ValueError("File location must be a valid path or URL.")
 
         headers.update(self._headers)
         if isinstance(data, dict):
