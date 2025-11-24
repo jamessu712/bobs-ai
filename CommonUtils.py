@@ -43,5 +43,10 @@ class CommonUtils:
             blob_utils.append(file_path, append_stream)
 
     @staticmethod
-    def read_video_to_bytes(blob_utils, base_path: str, prefix: str) -> None:
-        return blob_utils.read(base_path)
+    def read_video_to_bytes(blob_utils, base_path: str, prefix: str) -> bytes:
+        file_path = f"{base_path}{prefix}"
+
+        print("file_path:", file_path)
+
+        if blob_utils.exists(file_path):
+            return blob_utils.read(file_path)
