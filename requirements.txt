@@ -1,3 +1,4 @@
 dotenv
 requests
 azure-storage-blob
+azure-identity

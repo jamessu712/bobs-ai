@@ -41,3 +41,7 @@ class CommonUtils:
             append_bytes = f"{row}\n".encode("utf-8")
             append_stream = io.BytesIO(append_bytes)
             blob_utils.append(file_path, append_stream)
+
+    @staticmethod
+    def read_video_to_bytes(blob_utils, base_path: str, prefix: str) -> None:
+        return blob_utils.read(base_path)

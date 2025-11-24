@@ -103,7 +103,7 @@ def analyze_card (image_file, analyzer, endpoint, key):
                     elif field_data['type'] == "array":
                         print(f"{field_name}: {field_data['valueArray']}")
 
-
+############################################################################################################
     # 从环境变量读取参数
     container = os.getenv("BLOB_CONTAINER_NAME")
     blob_name = os.getenv("BLOB_NAME")
